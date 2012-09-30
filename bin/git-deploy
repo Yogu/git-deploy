@@ -53,7 +53,7 @@ module Git
     def diff_committed(local_path, revision = nil)
       remote_files = {}
       if revision
-        command = "git diff --name-status #{revision} -- #{local_path}"
+        command = "git diff --name-status --ignore-submodules=all #{revision} -- #{local_path}"
         changed_files(command)
       else
         remote_files = {}
