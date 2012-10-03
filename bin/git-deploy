@@ -51,15 +51,62 @@ module Git
     # We figure out only which files need updating
     # so don't upload duplicate files
     def diff_committed(local_path, revision = nil)
-      remote_files = {}
       if revision
         command = "git diff --name-status --ignore-submodules=all #{revision} -- #{local_path}"
-        changed_files(command)
+        remote_files = changed_files(command)
+        remote_files.merge! process_submodules revision
+	remote_files
       else
         remote_files = {}
-        `git ls-files`.split("\n").each {|file| remote_files[file] = 'M'}
+        `git ls-files`.split("\n").each do |file|
+          # directories are submodules, we have to skip them
+          if File.directory? file
+            puts "WARNING: Submodule #{file} has to be uploaded manually!"
+          else
+            remote_files[file] = 'M'
+          end
+        end
         remote_files
       end
+    end
+
+    # Returns a hash of files changed in all submodules of the current directory
+    def process_submodules(revision)
+      files = Hash.new
+      # List all submodules. Note: does not list deleted submodules
+      submodules = `git submodule foreach --quiet 'echo $path'`.split("\n")
+      submodules.each do |path|
+        # Request extended diff for submodule, to receive old and new revision
+        puts "processing submodule #{path}"
+        diff = `git diff #{revision} -- #{path}`
+        added = /^\+.* ([a-z0-9]{40})$/.match(diff)
+        added = added[1] unless added.nil?
+        removed = /^\-.* ([a-z0-9]{40})$/.match(diff)
+        removed = removed[1] unless removed.nil?
+        # added now contains new revision, removed old one.
+        if (added.nil? && removed.nil?) || (added == removed)
+          puts "No change in submodule #{path}"
+        # currently, this script does not support adding or removing repositories.
+        elsif added.nil?
+          puts "WARNING: Submodule #{path} removed from repository. Please remove the submodule manually from target."
+        elsif removed.nil?
+          puts "WARNING: Submodule #{path} added to repository. Please add the submodule manually to target."
+        else
+          puts "Submodule changed: #{path}, #{removed}..#{added}"
+          # Generate the diff hash between those revisions of the submodule
+          pwd = Dir.pwd
+          Dir.chdir path
+          subFiles = Git.diff_committed "", "#{removed}..#{added}"
+          # Concat file path and submodule path and push them to the files hash
+          subFiles.each do | file, action |
+            files[path+'/'+file] = action
+          end
+          puts pwd
+          # Don't forget to change back to the main repository's directory
+          Dir.chdir pwd
+        end
+      end
+      files
     end
 
     def changed_files(command, init = nil)
