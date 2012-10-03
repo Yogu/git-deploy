@@ -447,7 +447,7 @@ module Git
     end
     
     def dir_empty?
-     @ftp.list('*').empty?
+     @ftp.nlst.select{ |name| name != "." && name != ".." }.empty?
     end
 
     def mkdir_p(directory)
